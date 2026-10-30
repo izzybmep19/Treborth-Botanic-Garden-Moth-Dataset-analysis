@@ -1,4 +1,5 @@
 library(mgcv)
+library(rmarkdown)
 library(DBI)
 library(dbplyr)
 library(dplyr)
@@ -13,11 +14,16 @@ library(MASS)
 library(vegan)
 library(emmeans)
 library(patchwork)
-
-
+library(lunar)
+library(ISOweek)
+library(jpeg)
+library(grid)
+library(ggtext)
+library(xfun)
+library(magick) ## find cite
 #######Get data from access into R###########
 con <- odbcConnectAccess2007(
-  "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Izzys Database.accdb"
+  "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Chp 1/Data/Whole time/Izzys Database.accdb"
 )
 
 sp_data = sqlFetch(con, "IB_ALL_DATA_AND_WIND")
@@ -105,15 +111,34 @@ write.table(
   quote = FALSE
 )
 
+########shannons vs habitat######
+Shanons <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Shanons.xlsx")
+View(Shanons)
+df_long <- pivot_longer(Shanons,
+                        cols = -Year,
+                        names_to = "Habitat",
+                        values_to = "Value")
+ggplot(df_long, aes(x = Year,
+                    y = Value,
+                    color = Habitat,
+                    shape = Habitat,
+                    linetype = Habitat)) +
+  geom_line() +
+  geom_point(size = 2.5) +
+  theme_grey()
+  labs(x = "Year",
+       y = "Shannon's Index")+
+  ylim(0,5)
 
-#species abundace and richness
 
-Species_Abundance_by_week <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Access stuff/Results/Species Abundance by week.xlsx")
+######species abundace and richness year by year#########
+
+Species_Abundance_by_week <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Chp 1/Data/Access stuff/Results/Species Abundance by week.xlsx")
 View(Species_Abundance_by_week)
 
 ggplot(
   Species_Abundance_by_week,
-  aes(x = Week, y =`Number Of species`)
+  aes(x = Week, y = `Number Of species`)
 ) +
   geom_point(alpha = 0.4, size = 0.8) +
   stat_smooth(
@@ -122,7 +147,7 @@ ggplot(
     method.args = list(family = nb()),
     se = TRUE
   ) +
-  facet_wrap(~ Year) +
+  facet_wrap(~ Year, drop = FALSE) +
   theme_minimal()
 
 ggplot(
@@ -140,7 +165,7 @@ ggplot(
 
 ggplot(
   Species_Abundance_by_week,
-  aes(x = , y =`Mean Species Abundance`)
+  aes(x = Week, y = `Mean Species Abundance`)
 ) +
   geom_point(alpha = 0.4, size = 0.8) +
   stat_smooth(
@@ -149,7 +174,7 @@ ggplot(
     method.args = list(family = nb()),
     se = TRUE
   ) +
-  facet_wrap(~ Year) +
+  facet_wrap(~ Year, drop = FALSE) +
   theme_minimal()
 
 
@@ -301,10 +326,558 @@ gam_mod2 <- gam(
 )
 
 summary(gam_mod2)
+
+##############Specie Richness and Abundance Vs Climate 2024##############
+SpAbLine = sqlFetch(con, "SpAbLine")
+view(SpAbLine)
+
+Output_Dir3 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen/Abun and Rich"
+
+AvTempAbun = ggplot(SpAbLine,aes(x = AvTemp, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Average Monthly Temperature (\u00B0C)",
+    y = "Abundance"
+  )
+print(AvTempAbun)
+
+RainAbun = ggplot(SpAbLine,aes(x = Rain, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Average Monthly Rainfall (mm)",
+    y = "Abundance"
+  )
+print(RainAbun)
+
+AfDaysAbun = ggplot(SpAbLine,aes(x = AfDays, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Average Number of Air Frost Days Monthly",
+    y = "Abundance"
+  )
+print(AfDaysAbun)
+
+SpAbLine <- SpAbLine %>%
+  mutate(
+    Date = as.Date(paste(Year, Week, 1, sep = "-"),
+                   format = "%Y-%U-%u")
+  )
+##########moon#############
+
+SpAbLine <- SpAbLine %>%
+  mutate(
+    ISOweek = sprintf("%d-W%02d-1", Year, Week),  # Monday of week
+    Date = ISOweek2date(ISOweek)
+  )
+summary(SpAbLine$Date)
+
+SpAbLine$MoonPhase_rad <- lunar.phase(
+  SpAbLine$Date,
+  name = FALSE
+)
+length(SpAbLine$MoonPhase_rad)
+
+SpAbLine$MoonPhase <- SpAbLine$MoonPhase_rad / (2*pi)
+
+moon_df <- SpAbLine %>%
+  filter(!is.na(MoonPhase), !is.na(Abundance))
+
+MoonAbun <- ggplot(
+  moon_df,
+  aes(x = MoonPhase, y = Abundance)
+) +
+  geom_point(alpha = 0.25, size = 0.8) +
+  stat_smooth(
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(family = nb()),
+    se = TRUE
+  ) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Lunar Phase",
+    y = "Abundance"
+  )
+print(MoonAbun)
+#####Wind speed and direction########
+wind_df <- SpAbLine %>%
+  dplyr::select(Year, Wind_D, Wind_S, Abundance) %>%
+  dplyr::filter(
+    !is.na(Year),
+    !is.na(Wind_D),
+    !is.na(Wind_S),
+    !is.na(Abundance)
+  )
+
+
+dir_levels <- c(
+  "N", "NNE", "NE", "ENE",
+  "E", "ESE", "SE", "SSE",
+  "S", "SSW", "SW", "WSW",
+  "W", "WNW", "NW", "NNW"
+)
+
+wind_df <- wind_df %>%
+  mutate(
+    Wind_D = ifelse(Wind_D == 360, 0, Wind_D),
+    wind_dir = cut(
+      Wind_D,
+      breaks = seq(0, 360, by = 22.5),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = dir_levels
+    )
+  ) %>%
+  filter(!is.na(wind_dir))
+
+
+wind_df <- wind_df %>%
+  mutate(
+    wind_speed_bin = cut(
+      Wind_S,
+      breaks = c(0, 2, 5, 8, 12, Inf),
+      labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
+      include.lowest = TRUE
+    )
+  )
+
+wind_sum_all <- wind_df %>%
+  group_by(wind_dir, wind_speed_bin) %>%
+  summarise(
+    total_Abun = mean(Abundance),
+    .groups = "drop"
+  )
+
+## Ensure correct direction order
+wind_sum_all$wind_dir <- factor(
+  wind_sum_all$wind_dir,
+  levels = dir_levels
+)
+
+## Ensure all directions exist (even zero-count)
+wind_sum_all <- wind_sum_all %>%
+  tidyr::complete(
+    wind_dir,
+    wind_speed_bin,
+    fill = list(total_Abun = 0)
+  )
+
+WindAbun = ggplot(
+  wind_sum_all,
+  aes(
+    x = wind_dir,
+    y = total_Abun,
+    fill = wind_speed_bin
+  )
+) +
+  geom_col(width = 1, color = "white", linewidth = 0.2) +
+  coord_polar(start = -pi/16) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(
+    breaks = scales::pretty_breaks(n = 5),
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  scale_fill_viridis_d(name = "Wind speed") +
+  labs(
+    title = "Wind Rose (All Years)",
+    y = "Total abundance"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+print(WindAbun)
+#################
+week_to_month <- c(
+  rep("Jan", 4), rep("Feb", 4), rep("Mar", 4), rep("Apr", 4),
+  rep("May", 4), rep("Jun", 4), rep("Jul", 4), rep("Aug", 4),
+  rep("Sep", 4), rep("Oct", 4), rep("Nov", 4), rep("Dec", 4),
+  rep("Dec", 4)  # week 49-52
+)
+WeekAbun = ggplot(SpAbLine,aes(x = Week, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  scale_x_continuous(
+      breaks = seq(1, 52, by = 4),      # choose breaks around start of each month
+      labels = week_to_month[seq(1, 52, by = 4)]
+    )+
+  labs(
+    x = "Month of The Year",
+    y = "Abundance"
+  )
+print(WeekAbun)
+
+MonthAbun = ggplot(SpAbLine,aes(x = Month, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")
+print(MonthAbun)
+
+YearAbun = ggplot(SpAbLine,aes(x = Year, y =Abundance)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Year",
+    y = "Abundance"
+  )
+print(YearAbun)
+
+AbunCombined_plot <- (WeekAbun | YearAbun) / 
+  (AvTempAbun | MoonAbun | RainAbun) / 
+  (AfDaysAbun | WindAbun)+
+  plot_annotation(
+    title = paste("All Trends for Abundance"),
+    tag_levels = "A"
+  )
+ggsave(
+  filename = file.path(Output_Dir3, paste0("All Trends for Abundance.jpeg")),
+  plot = AbunCombined_plot,
+  width = 15,
+  height = 20,
+  device = ragg::agg_jpeg
+)
+##rich##
+AvTempRich = ggplot(SpAbLine,aes(x = AvTemp, y =Richness)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth") +
+  ylim(0,120)+
+  labs(
+    x = "Average Monthly Temperature (\u00B0C)",
+    y = "Richness"
+  )
+print(AvTempRich)
+
+RainRich = ggplot(SpAbLine,aes(x = Rain, y =Richness)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Average Monthly Rainfall (mm)",
+    y = "Richness"
+  )
+print(RainRich)
+
+AfDaysRich = ggplot(SpAbLine,aes(x = AfDays, y =Richness)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  ylim(0,150)+
+  labs(
+    x = "Average Number of Air Frost Days Monthly",
+    y = "Richness"
+  )
+print(AfDaysRich)
+########Moon#######
+
+SpAbLine <- SpAbLine %>%
+  mutate(
+    ISOweek = sprintf("%d-W%02d-1", Year, Week),  # Monday of week
+    Date = ISOweek2date(ISOweek)
+  )
+summary(SpAbLine$Date)
+
+SpAbLine$MoonPhase_rad <- lunar.phase(
+  SpAbLine$Date,
+  name = FALSE
+)
+length(SpAbLine$MoonPhase_rad)
+
+SpAbLine$MoonPhase <- SpAbLine$MoonPhase_rad / (2*pi)
+
+moon_df <- SpAbLine %>%
+  filter(!is.na(MoonPhase), !is.na(Richness))
+
+MoonRich <- ggplot(
+  moon_df,
+  aes(x = MoonPhase, y = Richness)
+) +
+  geom_point(alpha = 0.25, size = 0.8) +
+  stat_smooth(
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(family = nb()),
+    se = TRUE
+  ) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Lunar Phase",
+    y = "Richness"
+  )
+print(MoonRich)
+#####Wind Wspeed and direction########
+wind_df <- SpAbLine %>%
+  dplyr::select(Year, Wind_D, Wind_S, Richness) %>%
+  dplyr::filter(
+    !is.na(Year),
+    !is.na(Wind_D),
+    !is.na(Wind_S),
+    !is.na(Richness)
+  )
+
+
+dir_levels <- c(
+  "N", "NNE", "NE", "ENE",
+  "E", "ESE", "SE", "SSE",
+  "S", "SSW", "SW", "WSW",
+  "W", "WNW", "NW", "NNW"
+)
+
+wind_df <- wind_df %>%
+  mutate(
+    Wind_D = ifelse(Wind_D == 360, 0, Wind_D),
+    wind_dir = cut(
+      Wind_D,
+      breaks = seq(0, 360, by = 22.5),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = dir_levels
+    )
+  ) %>%
+  filter(!is.na(wind_dir))
+
+
+wind_df <- wind_df %>%
+  mutate(
+    wind_speed_bin = cut(
+      Wind_S,
+      breaks = c(0, 2, 5, 8, 12, Inf),
+      labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
+      include.lowest = TRUE
+    )
+  )
+
+wind_sum_all <- wind_df %>%
+  group_by(wind_dir, wind_speed_bin) %>%
+  summarise(
+    total_Rich = mean(Richness),
+    .groups = "drop"
+  )
+
+## Ensure correct direction order
+wind_sum_all$wind_dir <- factor(
+  wind_sum_all$wind_dir,
+  levels = dir_levels
+)
+
+## Ensure all directions exist (even zero-count)
+wind_sum_all <- wind_sum_all %>%
+  tidyr::complete(
+    wind_dir,
+    wind_speed_bin,
+    fill = list(total_Rich = 0)
+  )
+
+WindRich = ggplot(
+  wind_sum_all,
+  aes(
+    x = wind_dir,
+    y = total_Rich,
+    fill = wind_speed_bin
+  )
+) +
+  geom_col(width = 1, color = "white", linewidth = 0.2) +
+  coord_polar(start = -pi/16) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(
+    breaks = scales::pretty_breaks(n = 5),
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  scale_fill_viridis_d(name = "Wind speed") +
+  labs(
+    title = "Wind Rose (All Years)",
+    y = "Total Richness"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+print(WindRich)
+################################
+
+WeekRich = ggplot(SpAbLine,aes(x = Week, y =Richness)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  scale_x_continuous(
+    breaks = seq(1, 52, by = 4),      # choose breaks around start of each month
+    labels = week_to_month[seq(1, 52, by = 4)]
+  )+
+  labs(
+    x = "Moths of The Year",
+    y = "Richness"
+  )
+print(WeekRich)
+
+YearRich = ggplot(SpAbLine,aes(x = Year, y =Richness)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  stat_smooth(
+    method = "lm",
+    formula = y ~ x,
+    geom = "smooth")+
+  labs(
+    x = "Year",
+    y = "Richness"
+  )
+print(YearRich)
+
+RichCombined_plot <- (WeekRich | YearRich) / 
+  (AvTempRich | MoonRich | RainRich) / 
+  (AfDaysRich | WindRich)+
+  plot_annotation(
+    title = paste("All Trends for Richness"),
+    tag_levels = "A"
+  )
+ggsave(
+  filename = file.path(Output_Dir3, paste0("All Trends for Richness.jpeg")),
+  plot = RichCombined_plot,
+  width = 15,
+  height = 20,
+  device = ragg::agg_jpeg
+)
+#########Abun vs Climate stats###########
+AvTempAbunStat = lm(Abundance~AvTemp, SpAbLine)
+RainAbunStat = lm(Abundance~Rain, SpAbLine)
+AfDaysAbunStat = lm(Abundance~AfDays, SpAbLine)
+MoonAbunStat = lm(Abundance~Moon, SpAbLine)
+WindDAbunStat = lm(Abundance~Wind_D, SpAbLine)
+WindSAbunStat = lm(Abundance~Wind_S, SpAbLine)
+WeekAbunStat = lm(Abundance~Week, SpAbLine)
+MonthAbunStat = lm(Abundance~Month, SpAbLine)
+YearAbunStat = lm(Abundance~Year, SpAbLine)
+
+AbunModels = list(
+  summary(AvTempAbunStat),
+  summary(RainAbunStat),
+  summary(AfDaysAbunStat),
+  summary(MoonAbunStat),
+  summary(WindSAbunStat),
+  summary(WindDAbunStat),
+  summary(WeekAbunStat),
+  summary(MonthAbunStat),
+  summary(YearAbunStat)
+)
+
+print(AbunModels)
+sink(file.path(Output_Dir3, "Abundance Models Stats Comprihensive.txt"))
+
+lapply(AbunModels, function(model_list) {
+  lapply(model_list, summary)
+})
+
+sink()
+
+AbunModels <- list(
+  AvTemp  = AvTempAbunStat,
+  Rain    = RainAbunStat,
+  AfDays  = AfDaysAbunStat,
+  Moon    = MoonAbunStat,
+  Wind_S  = WindSAbunStat,
+  Wind_D  = WindDAbunStat,
+  Week    = WeekAbunStat,
+  Month   = MonthAbunStat,
+  Year    = YearAbunStat
+)
+sink(file.path(Output_Dir3, "Abundance Models Stats.txt"))
+
+lapply(names(AbunModels), function(name) {
+  
+  cat("\n====================================\n")
+  cat("Predictor:", name, "\n")
+  cat("====================================\n\n")
+  
+  print(summary(AbunModels[[name]]))
+  cat("\n\n")
+})
+
+sink()
+######### Rich vs Climate stats#########
+AvTempRichStat = lm(Richness~AvTemp, SpAbLine)
+RainRichStat = lm(Richness~Rain, SpAbLine)
+AfDaysRichStat = lm(Richness~AfDays, SpAbLine)
+MoonRichStat = lm(Richness~Moon, SpAbLine)
+WindDRichStat = lm(Richness~Wind_D, SpAbLine)
+WindSRichStat = lm(Richness~Wind_S, SpAbLine)
+WeekRichStat = lm(Richness~Week, SpAbLine)
+MonthRichStat = lm(Richness~Month, SpAbLine)
+YearRichStat = lm(Richness~Year, SpAbLine)
+
+RichModels = list(
+  summary(AvTempRichStat),
+  summary(RainRichStat),
+  summary(AfDaysRichStat),
+  summary(MoonRichStat),
+  summary(WindSRichStat),
+  summary(WindDRichStat),
+  summary(WeekRichStat),
+  summary(MonthRichStat),
+  summary(YearRichStat)
+)
+
+
+sink(file.path(Output_Dir3, "Richness Models Stats Comprihensive.txt"))
+
+lapply(RichModels, function(model_list) {
+  lapply(model_list, summary)
+})
+
+sink()
+
+RichModels <- list(
+  AvTemp  = AvTempRichStat,
+  Rain    = RainRichStat,
+  AfDays  = AfDaysRichStat,
+  Moon    = MoonRichStat,
+  Wind_S  = WindSRichStat,
+  Wind_D  = WindDRichStat,
+  Week    = WeekRichStat,
+  Month   = MonthRichStat,
+  Year    = YearRichStat
+)
+sink(file.path(Output_Dir3, "Richness Models Stats.txt"))
+
+lapply(names(RichModels), function(name) {
+  
+  cat("\n====================================\n")
+  cat("Predictor:", name, "\n")
+  cat("====================================\n\n")
+  
+  print(summary(RichModels[[name]]))
+  cat("\n\n")
+})
+
+sink()
+#################Abundance and richness vs climate 2019################
 ##############Specie Richness and Abundance Vs Climate##############
 SpAbLine = sqlFetch(con, "SpAbLine")
 view(SpAbLine)
-Output_Dir3 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt nine"
+SpAbLine = subset(SpAbLine, Year >=1991 & Year<=2019)
+
+Output_Dir3 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen"
 
 AvTempAbun = ggplot(SpAbLine,aes(x = AvTemp, y =Abundance)) +
   geom_point(alpha = 0.4, size = 0.8) +
@@ -327,12 +900,47 @@ AfDaysAbun = ggplot(SpAbLine,aes(x = AfDays, y =Abundance)) +
     formula = y ~ x,
     geom = "smooth")
 
-MoonAbun = ggplot(SpAbLine,aes(x = Moon, y =Abundance)) +
-  geom_point(alpha = 0.4, size = 0.8) +
+SpAbLine <- SpAbLine %>%
+  mutate(
+    Date = as.Date(paste(Year, Week, 1, sep = "-"),
+                   format = "%Y-%U-%u")
+  )
+##########moon#############
+
+SpAbLine <- SpAbLine %>%
+  mutate(
+    ISOweek = sprintf("%d-W%02d-1", Year, Week),  # Monday of week
+    Date = ISOweek2date(ISOweek)
+  )
+summary(SpAbLine$Date)
+
+SpAbLine$MoonPhase_rad <- lunar.phase(
+  SpAbLine$Date,
+  name = FALSE
+)
+length(SpAbLine$MoonPhase_rad)
+
+SpAbLine$MoonPhase <- SpAbLine$MoonPhase_rad / (2*pi)
+
+moon_df <- SpAbLine %>%
+  filter(!is.na(MoonPhase), !is.na(Abundance))
+
+MoonAbun <- ggplot(
+  moon_df,
+  aes(x = MoonPhase, y = Abundance)
+) +
+  geom_point(alpha = 0.25, size = 0.8) +
   stat_smooth(
-    method = "lm",
-    formula = y ~ x,
-    geom = "smooth")
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(family = nb()),
+    se = TRUE
+  ) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Lunar Phase (0=new ÔåÆ 0.5=full ÔåÆ 1=new)",
+    y = "Abundance"
+  )
 
 #####Wind speed and direction########
 wind_df <- SpAbLine %>%
@@ -371,7 +979,7 @@ wind_df <- wind_df %>%
     wind_speed_bin = cut(
       Wind_S,
       breaks = c(0, 2, 5, 8, 12, Inf),
-      labels = c("0–2", "2–5", "5–8", "8–12", "12+"),
+      labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
       include.lowest = TRUE
     )
   )
@@ -427,11 +1035,7 @@ WindAbun = ggplot(
 #################
 
 WeekAbun = ggplot(SpAbLine,aes(x = Week, y =Abundance)) +
-  geom_point(alpha = 0.4, size = 0.8) +
-  stat_smooth(
-    method = "lm",
-    formula = y ~ x,
-    geom = "smooth")
+  geom_point(alpha = 0.4, size = 0.8)
 
 MonthAbun = ggplot(SpAbLine,aes(x = Month, y =Abundance)) +
   geom_point(alpha = 0.4, size = 0.8) +
@@ -447,7 +1051,7 @@ YearAbun = ggplot(SpAbLine,aes(x = Year, y =Abundance)) +
     formula = y ~ x,
     geom = "smooth")
 
-AbunCombined_plot <- (WeekAbun | MonthAbun | YearAbun) / 
+AbunCombined_plot <- (WeekAbun | YearAbun) / 
   (AvTempAbun | MoonAbun | RainAbun) / 
   (AfDaysAbun | WindAbun)+
   plot_annotation(
@@ -476,6 +1080,8 @@ RainRich = ggplot(SpAbLine,aes(x = Rain, y =Richness)) +
     method = "lm",
     formula = y ~ x,
     geom = "smooth")
+
+
 AfDaysRich = ggplot(SpAbLine,aes(x = AfDays, y =Richness)) +
   geom_point(alpha = 0.4, size = 0.8) +
   stat_smooth(
@@ -484,13 +1090,42 @@ AfDaysRich = ggplot(SpAbLine,aes(x = AfDays, y =Richness)) +
     geom = "smooth")+
   ylim(0,150)
 
-MoonRich = ggplot(SpAbLine,aes(x = Moon, y =Richness)) +
-  geom_point(alpha = 0.4, size = 0.8) +
-  stat_smooth(
-    method = "lm",
-    formula = y ~ x,
-    geom = "smooth")
+########Moon#######
 
+SpAbLine <- SpAbLine %>%
+  mutate(
+    ISOweek = sprintf("%d-W%02d-1", Year, Week),  # Monday of week
+    Date = ISOweek2date(ISOweek)
+  )
+summary(SpAbLine$Date)
+
+SpAbLine$MoonPhase_rad <- lunar.phase(
+  SpAbLine$Date,
+  name = FALSE
+)
+length(SpAbLine$MoonPhase_rad)
+
+SpAbLine$MoonPhase <- SpAbLine$MoonPhase_rad / (2*pi)
+
+moon_df <- SpAbLine %>%
+  filter(!is.na(MoonPhase), !is.na(Richness))
+
+MoonRich <- ggplot(
+  moon_df,
+  aes(x = MoonPhase, y = Richness)
+) +
+  geom_point(alpha = 0.25, size = 0.8) +
+  stat_smooth(
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(family = nb()),
+    se = TRUE
+  ) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Lunar Phase (0=new ÔåÆ 0.5=full ÔåÆ 1=new)",
+    y = "Richness"
+  )
 #####Wind Wspeed and direction########
 wind_df <- SpAbLine %>%
   dplyr::select(Year, Wind_D, Wind_S, Richness) %>%
@@ -528,7 +1163,7 @@ wind_df <- wind_df %>%
     wind_speed_bin = cut(
       Wind_S,
       breaks = c(0, 2, 5, 8, 12, Inf),
-      labels = c("0–2", "2–5", "5–8", "8–12", "12+"),
+      labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
       include.lowest = TRUE
     )
   )
@@ -583,18 +1218,7 @@ WindRich = ggplot(
 ################################
 
 WeekRich = ggplot(SpAbLine,aes(x = Week, y =Richness)) +
-  geom_point(alpha = 0.4, size = 0.8) +
-  stat_smooth(
-    method = "lm",
-    formula = y ~ x,
-    geom = "smooth")
-
-MonthRich = ggplot(SpAbLine,aes(x = Month, y =Richness)) +
-  geom_point(alpha = 0.4, size = 0.8) +
-  stat_smooth(
-    method = "lm",
-    formula = y ~ x,
-    geom = "smooth")
+  geom_point(alpha = 0.4, size = 0.8)
 
 YearRich = ggplot(SpAbLine,aes(x = Year, y =Richness)) +
   geom_point(alpha = 0.4, size = 0.8) +
@@ -603,7 +1227,7 @@ YearRich = ggplot(SpAbLine,aes(x = Year, y =Richness)) +
     formula = y ~ x,
     geom = "smooth")
 
-RichCombined_plot <- (WeekRich | MonthRich | YearRich) / 
+RichCombined_plot <- (WeekRich | YearRich) / 
   (AvTempRich | MoonRich | RainRich) / 
   (AfDaysRich | WindRich)+
   plot_annotation(
@@ -729,10 +1353,400 @@ lapply(names(RichModels), function(name) {
 })
 
 sink()
+###############Person Trap Trips yes Ylim###################
+Recorder <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Recorder-flipped.xlsx")
+View(Recorder)
+
+MothGroupPlot = ggplot(data = Recorder, aes(x=`Year`, y = `MothGroup`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+OtherPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Other`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonAPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person A`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonBPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person B`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonCPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person C`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonDPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person D`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonEPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person E`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonFPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person F`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonGPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person G`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonHPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person H`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonIPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person I`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonJPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person J`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonKPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person K`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonLPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person L`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonMPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person M`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonNPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person N`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+PersonOPlot = ggplot(data = Recorder, aes(x=`Year`, y = `Person O`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()+
+  ylim(0,366)
+
+###############
+PersonCombined_plot <- (MothGroupPlot | OtherPlot | PersonAPlot | PersonBPlot | PersonCPlot) / 
+  (PersonDPlot | PersonEPlot | PersonFPlot | PersonGPlot | PersonHPlot) / 
+  (PersonIPlot | PersonJPlot | PersonKPlot | PersonLPlot | PersonMPlot)/
+  (PersonNPlot | PersonOPlot)+
+  plot_annotation(
+    title = paste("All Trends for Persons"),
+    tag_levels = ("1")
+  )
+print(PersonCombined_plot)
+
+ggsave(
+  filename = file.path(Output_Dir4, paste0("Recorder_Yes_YLim.jpeg")),
+  plot = PersonCombined_plot,
+  width = 15,
+  height = 20,
+  device = ragg::agg_jpeg
+)
+############Person Trap Trips no Ylim#############
+MothGroupPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `MothGroup`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+OtherPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Other`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonAPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person A`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonBPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person B`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonCPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person C`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonDPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person D`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonEPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person E`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonFPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person F`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonGPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person G`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonHPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person H`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonIPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person I`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonJPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person J`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonKPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person K`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonLPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person L`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonMPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person M`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonNPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person N`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+PersonOPlot2 = ggplot(data = Recorder, aes(x=`Year`, y = `Person O`))+
+  geom_line()+
+  geom_point()+
+  theme_minimal()
+
+###############
+PersonCombined_plot2 <- (MothGroupPlot2 | OtherPlot2 | PersonAPlot2 | PersonBPlot2 | PersonCPlot2) / 
+  (PersonDPlot2 | PersonEPlot2 | PersonFPlot2 | PersonGPlot2 | PersonHPlot2) / 
+  (PersonIPlot2 | PersonJPlot2 | PersonKPlot2 | PersonLPlot2 | PersonMPlot2)/
+  (PersonNPlot2 | PersonOPlot2)+
+  plot_annotation(
+    title = paste("All Trends for Persons"),
+    tag_levels = ("1")
+  )
+print(PersonCombined_plot2)
+
+ggsave(
+  filename = file.path(Output_Dir4, paste0("Recorder_No_YLim.jpeg")),
+  plot = PersonCombined_plot2,
+  width = 15,
+  height = 20,
+  device = ragg::agg_jpeg
+)
+##############Yearly presence############
+all_years <- tibble(
+  YEAR = sort(unique(c(sp_data$YEAR, 2020)))
+)
+
+presence_df <- all_years %>%
+  mutate(
+    Date = purrr::map(
+      YEAR,
+      ~ seq.Date(
+        from = as.Date(paste0(.x, "-01-01")),
+        to   = as.Date(paste0(.x, "-12-31")),
+        by   = "day"
+      )
+    )
+  ) %>%
+  unnest(Date) %>%
+  left_join(
+    sp_data %>%
+      mutate(Date = as.Date(Date)) %>%
+      group_by(YEAR, Date) %>%
+      summarise(COUNT = sum(COUNT), .groups = "drop"),
+    by = c("YEAR", "Date")
+  ) %>%
+  mutate(
+    COUNT   = replace_na(COUNT, 0),
+    present = as.integer(COUNT > 0)
+  )
+
+
+
+ggplot(presence_df,
+       aes(x = yday(Date), y = 1, fill = factor(present))) +
+  geom_raster() +
+  facet_wrap(~ YEAR, ncol = 4) +
+  scale_fill_manual(
+    values = c("Absent" = "white", "Sampled" = "navy"),
+    name = "Data present"
+  ) +
+  scale_x_continuous(
+    breaks = c(1, 91, 182, 274, 365),
+    labels = c("Jan", "Apr", "Jul", "Oct", "Dec"),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(limits = c(0.5, 1.5)) +
+  labs(
+    x = "Month",
+    y = NULL,
+    title = "Daily Sampling Presence by Year"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.border = element_rect(colour = "grey", fill = NA, linewidth = 0.6),
+    
+    
+    axis.text.x = element_text(size = 9),
+    axis.ticks.x = element_line(),
+    
+    panel.grid = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.spacing = unit(0.8, "lines")
+  )
+###########Count, Effort and CE###########
+library(readxl)
+IndByEff <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Indices by Effort.xlsx")
+View(Indices_by_Effort)
+layout(matrix(c(1,0,
+                2,3,
+                4,5),
+              nrow = 3,
+              byrow = TRUE))
+
+
+plot(Recorder$Year, Recorder$Count,
+     type = "o",
+     xlab = "Year",
+     ylab = "Total Individuals Counted",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+mtext("A", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+CountLM = lm(Count ~ Year, data = Recorder)
+
+plot(Recorder$Year, Recorder$Effort,
+     type = "o",
+     xlab = "Year",
+     ylab = "Effort (Days sampled / Days in year)",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+mtext("B", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+EffortLM = lm(Effort ~ Year, data = Recorder)
+
+
+plot(Recorder$Year, Recorder$`C/E`,
+     xlab = "Year",
+     ylab = "Count / Effort",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+CELM = lm(`C/E` ~ Year, data = Recorder)
+mtext("A", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+abline(CELM)
+
+plot(IndByEff$Year,IndByEff$Shannons,ylim = c(0,5),
+     xlab = "Year", ylab = "Shannon's Index",
+     type = "o",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+mtext("B", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+ShanLineYear = lm(IndByEff$Shannons~IndByEff$Year)
+summary(ShanLineYear)
+
+plot(IndByEff$Effort,IndByEff$Shannons,ylim = c(0,5),
+     xlab = "Number of Days Sampled", ylab = "Shannon's Index",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+mtext("C", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+ShanLine = lm(IndByEff$Shannons~IndByEff$Effort)
+summary(ShanLine)
+abline(ShanLine)
+
+
+plot(IndByEff$Year,IndByEff$Simpsons,ylim = c(0,1),
+     xlab = "Year", ylab = "Simpson's Index",
+     type = "o",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+SimpLineYear = lm(IndByEff$Simpsons~IndByEff$Year)
+mtext("D", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+summary(SimpLineYear)
+
+plot(IndByEff$Effort,IndByEff$Simpsons,ylim = c(0,1),
+     xlab = "Number of Days Sampled", ylab = "Simpson's Index",
+     cex.lab = 1.2,
+     pch = 16,
+     cex=1,
+     cex.axis = 1.2)
+SimpLine = lm(IndByEff$Simpsons~IndByEff$Effort)
+mtext("E", side = 3, adj = 0, line = 0.5, cex = 1.2, font = 6)
+summary(SimpLine)
+abline(SimpLine)
+
+par(mfrow = c(1,1)) 
+summary(CountLM)
+summary(EffortLM)
+summary(CELM)
+summary(ShanLine)
+summary(SimpLine)
+summary(ShanLineYear)
+summary(SimpLineYear)
 #####################Catagory Counts########
 SpAbBox = sqlFetch(con, "SpAbBox")
 view(SpAbBox)
-Output_Dir4 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt nine"
+Output_Dir4 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen"
 
 
 AvSize = sqlFetch(con,"AvSize")
@@ -744,7 +1758,7 @@ FoodCat = sqlFetch(con,"FoodCatagories")
 LarvalFoodPlants = sqlFetch(con,"LarvalFoodPlants")
 Overwinter = sqlFetch(con,"Overwinter")
 Status = sqlFetch(con,"Status")
-
+names(Ditribution)
 
 MothColBar = ggplot(MothCol, aes(x = Colour, y = Count, fill = Colour)) +
   geom_col(color = "grey30", width = 0.8) +
@@ -795,7 +1809,7 @@ BroodNumBar = ggplot(BroodNumber, aes(x = `Brood Number`, y = Count)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1),
         text = element_text(size = 30))
 
-DistBar = ggplot(Ditribution, aes(x = distribution, y = Count)) +
+DistBar = ggplot(Ditribution, aes(x = distribution, y = DistCount)) +
   geom_col() +
   scale_fill_viridis_c() +
   labs(
@@ -899,12 +1913,27 @@ ggsave(
   height = 30,
   device = ragg::agg_jpeg
 )
+
+
+
+vars <- c("Family","Overwinter","Status","Distribution","Colour","Food", "BroodNumb")
+
+for(v in vars){
+  cat("\n---", v, "---\n")
+  print(summary(aov(as.formula(paste("Richness ~", v)), data = SpAbBox)))
+}
+for(v in vars){
+  cat("\n---", v, "---\n")
+  print(summary(aov(as.formula(paste("Abundance ~", v)), data = SpAbBox)))
+}
+
 ########GLM graphs and stats#######
 
 # Directory into which results of current analysis will saved
-output_path = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt nine"
-
-spp_codes = c(2091, 2189, 2164, 2110, 1773, 1902, 1913, 1681, 1305, 2128, 2318, 1293, 2241, 1727, 2492, 1922, 834, 2127, 1288, 1957, 2237, 970, 2240, 1872, 1766, 2160, 1881, 2489, 2422, 2245, 2089, 2111, 1979, 18, 1646, 1853, 1926, 2484, 2263, 1708, 1702, 2134, 1893, 2118, 1809, 2264, 2030, 2133, 1345, 1883, 2341, 1653, 1762, 2102, 1784, 1761, 1962, 2248, 1887, 1958, 2297, 2155, 1043, 2150, 2443, 2441, 2087, 2176, 1912, 2117, 2232, 1833, 1954, 1945, 2166, 2188, 2187, 17, 2291, 1934, 2243, 1917, 1728, 2444, 1807, 2138, 2254, 1768, 2469, 2289, 2078, 2109, 1338, 874, 2173, 1036, 663, 2063, 1930, 2389, 2028, 1931, 2179, 2139, 2256, 1789, 1920, 2047, 1948, 1376, 2182, 1803, 2350, 2198, 2477, 1769, 1747, 2380, 1750, 1937, 1800, 1799, 2267, 2262, 2069, 2011, 2281, 1903, 1907, 1852, 2061, 2434, 1755, 1651, 2327, 1738, 2050, 1076, 1764, 1524, 1956, 2008, 1693, 2321, 2449, 873, 2130, 1640, 2330, 1390, 1960, 1947, 1923, 1722, 2265, 2353, 1817, 2364, 1720, 2439, 2136, 1951, 1837, 2190, 1777, 2107, 2112, 2322, 1910, 2270, 2280, 1819, 2387, 2299, 1385, 2271, 15, 1652, 1754, 1767, 2278, 1919, 2064, 1398, 2274, 1808, 1940, 1904, 2305, 2450, 1932, 1821, 1936, 1392, 2119, 1921, 1659, 2154, 1802) # replace with your species codes
+output_path1 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen/All Trends/Plots"
+output_path2 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen/All Trends/AIC"
+output_path3 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Nineteen/All Trends/Stats"
+spp_codes = c(14, 15, 16, 17, 18, 140, 141, 162, 216, 220, 424, 425, 426, 438, 453, 464, 599, 647, 648, 656, 658, 663, 726, 782, 822, 873, 874, 883, 936, 937, 966, 970, 971, 972, 980, 989, 998, 1006, 1011, 1036, 1038, 1039, 1041, 1042, 1045, 1053, 1063, 1076, 1082, 1083, 1113, 1138, 1159, 1175, 1176, 1197, 1200, 1201, 1205, 1212, 1236, 1257, 1260, 1261, 1288, 1290, 1293, 1297, 1304, 1309, 1331, 1333, 1335, 1338, 1342, 1343, 1344, 1345, 1376, 1390, 1392, 1398, 1405, 1413, 1458, 1474, 1498, 1501, 1509, 1631, 1632, 1634, 1637, 1638, 1640, 1646, 1648, 1651, 1652, 1653, 1654, 1657, 1659, 1663, 1665, 1666, 1669, 1673, 1681, 1689, 1693, 1699, 1701, 1702, 1704, 1707, 1708, 1709, 1713, 1715, 1716, 1718, 1719, 1722, 1723, 1724, 1725, 1727, 1728, 1732, 1733, 1734, 1737, 1738, 1739, 1742, 1746, 1747, 1748, 1750, 1752, 1754, 1755, 1756, 1757, 1758, 1759, 1760, 1761, 1762, 1764, 1765, 1766, 1767, 1768, 1769, 1773, 1776, 1777, 1778, 1779, 1781, 1784, 1789, 1790, 1793, 1795, 1796, 1797, 1799, 1800, 1801, 1802, 1803, 1804, 1807, 1808, 1809, 1813, 1817, 1819, 1821, 1825, 1826, 1830, 1832, 1833, 1834, 1835, 1837, 1852, 1853, 1854, 1857, 1858, 1860, 1862, 1872, 1875, 1876, 1879, 1881, 1883, 1885, 1887, 1888, 1893, 1902, 1903, 1904, 1906, 1907, 1910, 1912, 1913, 1914, 1915, 1917, 1919, 1920, 1921, 1922, 1923, 1926, 1927, 1930, 1931, 1932, 1933, 1934, 1935, 1936, 1937, 1940, 1941, 1942, 1943, 1945, 1947, 1949, 1951, 1952, 1954, 1955, 1956, 1957, 1958, 1960, 1961, 1962, 1979, 1980, 1981, 1991, 1992, 1994, 1995, 1997, 1998, 1999, 2000, 2003, 2006, 2007, 2008, 2011, 2014, 2026, 2027, 2028, 2030, 2033, 2038, 2044, 2047, 2049, 2050, 2057, 2060, 2061, 2063, 2064, 2069, 2078, 2079, 2082, 2084, 2087, 2088, 2089, 2091, 2098, 2102, 2104, 2105, 2107, 2108, 2109, 2110, 2111, 2112, 2117, 2118, 2119, 2120, 2121, 2122, 2123, 2126, 2127, 2128, 2130, 2133, 2134, 2135, 2137, 2138, 2139, 2142, 2145, 2147, 2150, 2154, 2155, 2156, 2158, 2160, 2163, 2164, 2166, 2167, 2171, 2173, 2176, 2177, 2178, 2179, 2182, 2186, 2187, 2188, 2189, 2190, 2193, 2195, 2196, 2198, 2199, 2205, 2214, 2216, 2221, 2229, 2231, 2232, 2235, 2236, 2237, 2240, 2243, 2245, 2247, 2248, 2255, 2256, 2258, 2259, 2262, 2263, 2264, 2265, 2267, 2270, 2271,2273 ,2274 ,2278 , 2280, 2281, 2284, 2289, 2290, 2291, 2293, 2295, 2297, 2298, 2299, 2302, 2305, 2306, 2318, 2321, 2322, 2326, 2327, 2330, 2331, 2335, 2336, 2337, 2338, 2339, 2341, 2342, 2343, 2344, 2345, 2350, 2353, 2357, 2358, 2360, 2361, 2364, 2375, 2379, 2380, 2381, 2382, 2385, 2387, 2389, 2394, 2400, 2403, 2410, 2422, 2434, 2439, 2441, 2442, 2443, 2444, 2447, 2449, 2450, 2466, 2469, 2474, 2476, 2477, 2484,2489, 2492 , 5001, 5008, 5010, 5023) # replace with your species codes
 
 # ---- safe_nb: only returns a fitted glm.nb object or NULL ----
 safe_nb <- function(formula, data, min_rows = 10){
@@ -921,40 +1950,48 @@ safe_nb <- function(formula, data, min_rows = 10){
   if(!inherits(fit, "negbin")) return(NULL)
   return(fit)
 }
+species_info <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Species_Lookup.xlsx")
+image_folder <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images"
 
 for(sp in spp_codes){
     df <- subset(sp_data, sp_data$SPECIES == sp)
   n_years <- length(unique(df$YEAR))
   n_weeks <- length(unique(df$WEEKNO))
+  df = subset(df, YEAR >=1991 & YEAR<=2019)
+  has_af <- any(df$AfDays > 0, na.rm = TRUE)
   
   if (n_years < 4 | n_weeks < 5) {
     cat("Skipping species:", sp,
-        "— insufficient data (years:", n_years,
+        "ÔÇö insufficient data (years:", n_years,
         ", weeks:", n_weeks, ")\n\n")
     next
   }
   
-  # --- CREATE PLOTS ---
+
+  week_to_month <- c(
+    rep("Jan", 4), rep("Feb", 4), rep("Mar", 4), rep("Apr", 4),
+    rep("May", 4), rep("Jun", 4), rep("Jul", 4), rep("Aug", 4),
+    rep("Sep", 4), rep("Oct", 4), rep("Nov", 4), rep("Dec", 4),
+    rep("Dec", 4)  # week 49-52
+  )
+
   p_week <- ggplot(df, aes(x = WEEKNO, y = COUNT)) +
     geom_point(alpha = 0.5) +
-    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
-                method.args = list(family = nb()), se = TRUE) +
     ggtitle("Seasonal (week)") +
-    xlim(1, 52)
+    xlim(1, 52) +
+    scale_x_continuous(
+      breaks = seq(1, 52, by = 4),      # choose breaks around start of each month
+      labels = week_to_month[seq(1, 52, by = 4)]
+    )
+  
   
   p_year <- ggplot(df, aes(x = YEAR, y = COUNT)) +
     geom_point(alpha = 0.5) +
     stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
                 method.args = list(family = nb()), se = TRUE) +
     ggtitle("Yearly Trend")+
-    xlim(1991,2025)
+    xlim(1991,2019)
   
-  p_month <- ggplot(df, aes(x = MONTHNO, y = COUNT)) +
-    geom_point(alpha = 0.5) +
-    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
-                method.args = list(family = nb()), se = TRUE) +
-    ggtitle("Monthly Trend")+
-    xlim(1,12)
   
   p_AvTemp <- ggplot(df, aes(x = AvTemp, y = COUNT)) +
     geom_point(alpha = 0.5) +
@@ -969,13 +2006,6 @@ for(sp in spp_codes){
                 method.args = list(family = nb()), se = TRUE) +
     ggtitle("Rain")+
     xlim(0,300)
-  
-  p_Moon <- ggplot(df, aes(x = Moon, y = COUNT)) +
-    geom_point(alpha = 0.5) +
-    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
-                method.args = list(family = nb()), se = TRUE) +
-    ggtitle("Moon")+
-    xlim(0,1)
   
 ####wind#####
   wind_df <- df %>%
@@ -1014,7 +2044,7 @@ for(sp in spp_codes){
       wind_speed_bin = cut(
         WIND_S,
         breaks = c(0, 2, 5, 8, 12, Inf),
-        labels = c("0–2", "2–5", "5–8", "8–12", "12+"),
+        labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
         include.lowest = TRUE
       )
     )
@@ -1074,22 +2104,121 @@ for(sp in spp_codes){
                 method.args = list(family = nb()), se = TRUE) +
     ggtitle("Air Frost Days")+
     xlim(0,20)
+  blank_panel <- plot_spacer()
+  ########Image and info#####
   
-  combined_plot <- (p_week | p_month | p_year) / 
-    (p_AvTemp | p_Moon | p_Rain) / 
-    (p_Af | p_Wind)+
-    plot_annotation(
-      title = paste("All Trends for", sp),
-      tag_levels = "A"
+  image_folder <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images"
+  info_row <- species_info %>% 
+    dplyr::filter(SPECIES == sp)
+  
+  if (nrow(info_row) == 1) {
+    
+    img_file <- info_row$`Image file`[1]
+    img_path <- file.path(image_folder, img_file)
+    
+    if (file.exists(img_path)) {
+      
+      img <- jpeg::readJPEG(img_path)
+      img_grob <- grid::rasterGrob(img, interpolate = TRUE)
+      
+      info_label <- paste0(
+        "<span style='font-size:22pt; font-weight:700;'>",
+        info_row$`Common Name`, "</span><br><br>",
+        
+        "<b>Scientific name:</b> <i>",
+        info_row$`Sci Name`, "</i><br>",
+        
+        "<b>Welsh name:</b> ", info_row$`Welsh Name`, "<br>",
+        "<b>Family:</b> ", info_row$Family, "<br>",
+        "<b>Wingspan:</b> ", info_row$Size, " mm"
+      )
+      
+      p_info <- ggplot() +
+        
+        # Image
+        annotation_custom(
+          img_grob,
+          xmin = 0.1, xmax = 0.9,
+          ymin = 0.55, ymax = 0.98
+        )+
+        
+        # Text block
+        annotate(
+          "richtext",
+          x = 0.05,
+          y = 0.50,
+          hjust = 0,
+          vjust = 1,
+          label = info_label,
+          size = 6,
+          fill = NA,
+          label.color = NA
+        )+
+        
+        theme_void() +
+        xlim(0, 1) +
+        ylim(0, 1)
+      
+    } else {
+      message("Image file missing for species ", sp)
+      p_info <- patchwork::plot_spacer()
+    }
+    
+  } else {
+    message("No lookup row for species ", sp)
+    p_info <- patchwork::plot_spacer()
+  }
+  
+  ############################
+  
+  if (has_af) {
+    
+    combined_plot <-
+      p_info +
+      (
+        (p_week | p_year) /
+          (p_AvTemp | p_Rain) /
+          (p_Wind | if(has_af) p_Af else patchwork::plot_spacer())
+      ) +
+      plot_layout(widths = c(1.3, 3))
+    
+    combined_plot <- combined_plot +
+      plot_annotation(
+        tag_levels = "A"
+      )
+    
+    ggsave(
+      file.path(output_path1, paste0("combined_plot_", sp, ".png")),
+      combined_plot,
+      width = 15,
+      height = 20
     )
-  
-  # Save the combined plot
-  ggsave(
-    file.path(output_path, paste0("combined_plot_", sp, ".png")),
-    combined_plot,
-    width = 15,
-    height = 20
-  )
+    
+  } else {
+    
+    combined_plot <-
+      p_info +
+      (
+        (p_week | p_year) /
+          (p_AvTemp | p_Rain) /
+          (p_Wind | if(has_af) p_Af else patchwork::plot_spacer())
+      ) +
+      plot_layout(widths = c(1.3, 3))
+    
+    combined_plot <- combined_plot +
+      plot_annotation(
+        tag_levels = "A"
+      )
+    
+    ggsave(
+      file.path(output_path1, paste0("combined_plot_", sp, ".png")),
+      combined_plot,
+      width = 15,
+      height = 20
+    )
+    
+  }
+
   
   cat("\n--- Finished plotting for species:", sp, "---\n\n")
   
@@ -1169,7 +2298,7 @@ for(sp in spp_codes){
     aic_table <- aic_table[order(aic_table$AIC), ]
     
     write.table(aic_table,
-                file = file.path(output_path, paste0("AIC_", sp, ".txt")),
+                file = file.path(output_path2, paste0("AIC_", sp, ".txt")),
                 sep = "\t", quote = FALSE, row.names = FALSE)
     
   } else {
@@ -1177,7 +2306,7 @@ for(sp in spp_codes){
   }
   
   # ---- save summaries of valid models ----
-  sink(file.path(output_path, paste0("summary_", sp, "_LM_AIC.txt")))
+  sink(file.path(output_path3, paste0("summary_", sp, "_LM_AIC.txt")))
   cat("=== Species:", sp, "===\n\n")
   if(length(valid_models) > 0){
     cat("AIC table:\n")
@@ -1192,18 +2321,19 @@ for(sp in spp_codes){
   }
   sink()
   
-} # end species loop
+} 
 
 
-output_dir1 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt nine/Overlapped"
-output_dir2 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt nine/Separate"
-
+output_dir1 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Years Overlapped"
+output_dir2 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Years Separate/Without Blanks"
+output_dir3 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Years Separate/With Blanks"
+output_dir4 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/Years Separate/Stats"
 for(sp in spp_codes){
   Practicemoth = subset(sp_data, sp_data$SPECIES == sp)
   if (nrow(Practicemoth) == 0) next
   
   Practicemoth_filt <- Practicemoth %>%
-    filter(YEAR >= 1991, YEAR <= 2025) %>%
+    filter(YEAR >= 1991, YEAR <= 2024) %>%
     group_by(YEAR) %>%
     filter(
       n() >= 10,                       # enough rows
@@ -1237,27 +2367,627 @@ for(sp in spp_codes){
     device = ragg::agg_jpeg
   )
   
-  AllModelsSeparate <- ggplot(
-    Practicemoth_filt,
+  AllModelsSeparate <- ggplot( Practicemoth_filt, aes(x = WEEKNO, y = COUNT) ) + 
+  geom_point(alpha = 0.4, size = 0.8) + 
+  stat_smooth( 
+    method = "gam", 
+    formula = y ~ s(x, k = 6), 
+    method.args = list(family = nb()), 
+    se = TRUE ) + 
+  facet_wrap(~ YEAR) + theme_minimal()
+  
+  ggsave(
+  filename = file.path(output_dir2, paste0(sp, "_GAM_Seperate.jpeg")),
+  plot = AllModelsSeparate,
+  width = 10,
+  height = 6,
+  dpi = 300,
+  device = ragg::agg_jpeg
+)
+  gam_year <- try(gam(
+    COUNT ~ YEAR + s(WEEKNO, by = YEAR, k = 6),
+    family = nb(),
+    data = Practicemoth_filt,
+    method = "REML",
+    na.action = na.fail
+  ), silent = TRUE)
+  
+  gam_null <- try(gam(
+    COUNT ~ YEAR + s(WEEKNO, k = 6),
+    family = nb(),
+    data = Practicemoth_filt,
+    method = "REML",
+    na.action = na.fail
+  ), silent = TRUE)
+  
+  if (inherits(gam_year, "try-error") ||
+      inherits(gam_null, "try-error")) next
+  
+  # save stats to txt
+  out <- capture.output({
+    cat("Species:", sp, "\n\n")
+    
+    cat("=== YEAR-SPECIFIC SMOOTH MODEL ===\n")
+    print(summary(gam_year))
+    
+    cat("\n\n=== NULL MODEL ===\n")
+    print(summary(gam_null))
+    
+    cat("\n\n=== MODEL COMPARISON ===\n")
+    print(anova(gam_null, gam_year, test = "Chisq"))
+  })
+  
+  writeLines(
+    out,
+    file.path(output_dir4, paste0(sp, "_TemporalShift_Test.txt"))
+  )
+  
+
+  all_years <- 1991:2024
+  all_weeks <- 1:52
+  
+  Practicemoth_full <- Practicemoth_filt %>%
+    complete(
+      YEAR = all_years,
+      WEEKNO = all_weeks,
+      fill = list(COUNT = NA)
+    ) %>%
+    mutate(YEAR = factor(YEAR, levels = all_years))
+  
+  empty_years <- Practicemoth_full %>%
+    group_by(YEAR) %>%
+    summarise(all_na = all(is.na(COUNT))) %>%
+    filter(all_na) %>%
+    pull(YEAR)
+  
+  ymax <- suppressWarnings(max(Practicemoth_full$COUNT, na.rm = TRUE))
+  if (!is.finite(ymax)) ymax <- 1
+  
+  label_df <- data.frame(
+    YEAR = empty_years,
+    WEEKNO = 26,
+    COUNT = ymax * 0.8,
+    label = "No data"
+  )
+  
+  
+  AllModelsSeparate2 <- ggplot(
+    Practicemoth_full,
     aes(x = WEEKNO, y = COUNT)
   ) +
-    geom_point(alpha = 0.4, size = 0.8) +
+    
+    geom_point(alpha = 0.4, size = 0.8, na.rm = TRUE) +
+    
     stat_smooth(
       method = "gam",
       formula = y ~ s(x, k = 6),
       method.args = list(family = nb()),
-      se = TRUE
+      se = TRUE,
+      na.rm = TRUE,
+      fullrange = FALSE
+    ) +   # ÔåÉ PLUS MUST BE HERE
+    
+    geom_text(
+      data = label_df,
+      aes(x = WEEKNO, y = COUNT, label = label),
+      inherit.aes = FALSE,
+      size = 4,
+      alpha = 0.6
+    )+
+    
+    facet_wrap(~ YEAR, drop = FALSE) +
+    
+    scale_x_continuous(
+      limits = c(1, 52),
+      breaks = seq(0, 52, 4)
     ) +
-    facet_wrap(~ YEAR) +
+    
     theme_minimal()
   
+  
   ggsave(
-    filename = file.path(output_dir2, paste0(sp, "_GAM_Separate.jpeg")),
-    plot = AllModelsSeparate,
+    filename = file.path(output_dir3, paste0(sp, "_GAM_Separate_All_Years.jpeg")),
+    plot = AllModelsSeparate2,
     width = 14,
     height = 10,
     dpi = 300,
     device = ragg::agg_jpeg
   )
 }
+###################BAP####################
+BAP_spp = c(2129, 1912, 2117, 2267, 1927, 2229, 2163, 2266, 2061, 2269, 2069, 1725, 2231, 2155, 2330, 1914, 2275, 2178, 2265, 2082, 2057, 14, 162, 2284, 2367, 2135, 2289, 2375 , 2387, 2299, 1689, 1646, 1719, 1632, 2186, 1784, 1723, 2342, 2361, 2382, 2274, 1915, 1732, 1704, 1673, 1759, 2123, 1757, 2242, 2060, 2081)
+output_path12 <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/BAP/Plots"
+output_path13 <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/BAP/Stats"
+output_path14 <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Thirteen/BAP/AIC"
+for(sp in BAP_spp){
+  df <- subset(sp_data, sp_data$SPECIES == sp)
+  n_years <- length(unique(df$YEAR))
+  n_weeks <- length(unique(df$WEEKNO))
+  
+  has_af <- any(df$AfDays > 0, na.rm = TRUE)
+  
+  if (n_years < 4 | n_weeks < 5) {
+    cat("Skipping species:", sp,
+        "ÔÇö insufficient data (years:", n_years,
+        ", weeks:", n_weeks, ")\n\n")
+    next
+  }
+  
+  # --- CREATE PLOTS ---
+  p_week <- ggplot(df, aes(x = WEEKNO, y = COUNT)) +
+    geom_point(alpha = 0.5) +
+    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
+                method.args = list(family = nb()), se = TRUE) +
+    ggtitle("Seasonal (week)") +
+    xlim(1, 52)
+  
+  p_year <- ggplot(df, aes(x = YEAR, y = COUNT)) +
+    geom_point(alpha = 0.5) +
+    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
+                method.args = list(family = nb()), se = TRUE) +
+    ggtitle("Yearly Trend")+
+    xlim(1991,2025)
+  
+  
+  p_AvTemp <- ggplot(df, aes(x = AvTemp, y = COUNT)) +
+    geom_point(alpha = 0.5) +
+    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
+                method.args = list(family = nb()), se = TRUE) +
+    ggtitle("Temperature Max")+
+    xlim(0,30)
+  
+  p_Rain <- ggplot(df, aes(x = Rain, y = COUNT)) +
+    geom_point(alpha = 0.5) +
+    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
+                method.args = list(family = nb()), se = TRUE) +
+    ggtitle("Rain")+
+    xlim(0,300)
+  
+  ####wind#####
+  wind_df <- df %>%
+    dplyr::select(YEAR, WIND_D, WIND_S, COUNT) %>%
+    dplyr::filter(
+      !is.na(YEAR),
+      !is.na(WIND_D),
+      !is.na(WIND_S),
+      !is.na(COUNT)
+    )
+  
+  
+  dir_levels <- c(
+    "N", "NNE", "NE", "ENE",
+    "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW",
+    "W", "WNW", "NW", "NNW"
+  )
+  
+  wind_df <- wind_df %>%
+    mutate(
+      WIND_D = ifelse(WIND_D == 360, 0, WIND_D),
+      wind_dir = cut(
+        WIND_D,
+        breaks = seq(0, 360, by = 22.5),
+        include.lowest = TRUE,
+        right = FALSE,
+        labels = dir_levels
+      )
+    ) %>%
+    filter(!is.na(wind_dir))
+  
+  
+  wind_df <- wind_df %>%
+    mutate(
+      wind_speed_bin = cut(
+        WIND_S,
+        breaks = c(0, 2, 5, 8, 12, Inf),
+        labels = c("0ÔÇô2", "2ÔÇô5", "5ÔÇô8", "8ÔÇô12", "12+"),
+        include.lowest = TRUE
+      )
+    )
+  
+  wind_sum_all <- wind_df %>%
+    group_by(wind_dir, wind_speed_bin) %>%
+    summarise(
+      total_Rich = sum(COUNT),
+      .groups = "drop"
+    )
+  
+  ## Ensure correct direction order
+  wind_sum_all$wind_dir <- factor(
+    wind_sum_all$wind_dir,
+    levels = dir_levels
+  )
+  
+  ## Ensure all directions exist (even zero-count)
+  wind_sum_all <- wind_sum_all %>%
+    tidyr::complete(
+      wind_dir,
+      wind_speed_bin,
+      fill = list(total_Rich = 0)
+    )
+  
+  p_Wind = ggplot(
+    wind_sum_all,
+    aes(
+      x = wind_dir,
+      y = total_Rich,
+      fill = wind_speed_bin
+    )
+  ) +
+    geom_col(width = 1, color = "white", linewidth = 0.2) +
+    coord_polar(start = -pi/16) +
+    scale_x_discrete(drop = FALSE) +
+    scale_y_continuous(
+      breaks = scales::pretty_breaks(n = 5),
+      labels = scales::number_format(accuracy = 0.01)
+    ) +
+    scale_fill_viridis_d(name = "Wind speed") +
+    labs(
+      title = "Wind Rose (All Years)",
+      y = "Total Count"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+  #############
+  
+  p_Af <- ggplot(df, aes(x = AfDays, y = COUNT)) +
+    geom_point(alpha = 0.5) +
+    stat_smooth(method = "gam", formula = y ~ s(x, k = 10),
+                method.args = list(family = nb()), se = TRUE) +
+    ggtitle("Air Frost Days")+
+    xlim(0,20)
+  blank_panel <- plot_spacer()
+  
+  
+  if (has_af) {
+    
+    combined_plot <- 
+      (blank_panel | p_week | p_year) /
+      (blank_panel |p_AvTemp | p_Rain) /
+      (blank_panel |p_Af | p_Wind)
+    
+    combined_plot <- combined_plot +
+      plot_annotation(
+        title = paste("All Trends for", sp),
+        tag_levels = "A"
+      )
+    
+    ggsave(
+      file.path(output_path12, paste0("combined_plot_", sp, ".png")),
+      combined_plot,
+      width = 15,
+      height = 20
+    )
+    
+  } else {
+    
+    combined_plot <- 
+      (blank_panel | p_week | p_year) /
+      (p_AvTemp | p_Rain | p_Wind)
+    
+    combined_plot <- combined_plot +
+      plot_annotation(
+        title = paste("All Trends for", sp),
+        tag_levels = "A"
+      )
+    
+    ggsave(
+      file.path(output_path12, paste0("combined_plot_", sp, ".png")),
+      combined_plot,
+      width = 15,
+      height = 15
+    )
+    
+  }
+  
+  
+  cat("\n--- Finished plotting for species:", sp, "---\n\n")
+  
+  models <- list(
+    Week        = safe_nb(COUNT ~ WEEKNO, df),
+    Month       = safe_nb(COUNT ~ MONTHNO, df),
+    Year        = safe_nb(COUNT ~ YEAR, df),
+    AVTEMP     = safe_nb(COUNT ~ AvTemp, df),
+    RAIN        = safe_nb(COUNT ~ Rain, df),
+    MOON        = safe_nb(COUNT ~ Moon, df),
+    Direction   = safe_nb(COUNT ~ WIND_D, df),
+    Speed       = safe_nb(COUNT ~ WIND_S, df),
+    AFDAYS      = safe_nb(COUNT ~ AfDays, df),
+    
+    WeekAv     = safe_nb(COUNT ~ AvTemp + WEEKNO, df),
+    WeekRain    = safe_nb(COUNT ~ Rain + WEEKNO, df),
+    WeekYear    = safe_nb(COUNT ~ YEAR + WEEKNO, df),
+    WeekMonth   = safe_nb(COUNT ~ MONTHNO + WEEKNO, df),
+    
+    MonthAv    = safe_nb(COUNT ~ MONTHNO + AvTemp, df),
+    MonthRain   = safe_nb(COUNT ~ MONTHNO + Rain, df),
+    MonthYear   = safe_nb(COUNT ~ MONTHNO + YEAR, df),
+    
+    YearAv     = safe_nb(COUNT ~ YEAR + AvTemp, df),
+    YearRain    = safe_nb(COUNT ~ YEAR + Rain, df),
+    
+    RainAv     = safe_nb(COUNT ~ Rain + AvTemp, df),
+    
+    MoonAv     = safe_nb(COUNT ~ Moon + AvTemp, df),
+    MoonRain    = safe_nb(COUNT ~ Moon + Rain, df),
+    MoonYear    = safe_nb(COUNT ~ Moon + YEAR, df),
+    MoonMonth   = safe_nb(COUNT ~ Moon + MONTHNO, df),
+    MoonWeek    = safe_nb(COUNT ~ Moon + WEEKNO, df),
+    
+    DirectionAv  = safe_nb(COUNT ~ WIND_D + AvTemp, df),
+    DirectionRain = safe_nb(COUNT ~ WIND_D + Rain, df),
+    DirectionYear = safe_nb(COUNT ~ WIND_D + YEAR, df),
+    DirectionMonth= safe_nb(COUNT ~ WIND_D + MONTHNO, df),
+    DirectionWeek = safe_nb(COUNT ~ WIND_D + WEEKNO, df),
+    DirectionMoon = safe_nb(COUNT ~ WIND_D + Moon, df),
+    
+    SpeedAv   = safe_nb(COUNT ~ WIND_S + AvTemp, df),
+    SpeedRain  = safe_nb(COUNT ~ WIND_S + Rain, df),
+    SpeedYear  = safe_nb(COUNT ~ WIND_S + YEAR, df),
+    SpeedMonth = safe_nb(COUNT ~ WIND_S + MONTHNO, df),
+    SpeedWeek  = safe_nb(COUNT ~ WIND_S + WEEKNO, df),
+    SpeedMoon  = safe_nb(COUNT ~ WIND_S + Moon, df),
+    SpeedDirection = safe_nb(COUNT ~ WIND_S + WIND_D, df),
+    
+    AfAv   = safe_nb(COUNT ~ AfDays + AvTemp, df),
+    AfRain  = safe_nb(COUNT ~ AfDays + Rain, df),
+    AfYear  = safe_nb(COUNT ~ AfDays + YEAR, df),
+    AfMonth = safe_nb(COUNT ~ AfDays + MONTHNO, df),
+    AfWeek  = safe_nb(COUNT ~ AfDays + WEEKNO, df),
+    AfMoon  = safe_nb(COUNT ~ AfDays + Moon, df),
+    AfDirection = safe_nb(COUNT ~ AfDays + WIND_D, df),
+    AfSpeed = safe_nb(COUNT ~ AfDays + WIND_S, df)
+  )
+  
+  # ---- keep only fitted glm.nb objects ----
+  valid_models <- Filter(function(x) inherits(x, "negbin"), models)
+  
+  aic_table <- NULL
+  
+  if (length(valid_models) > 0) {
+    
+    aic_vals <- sapply(valid_models, function(m) {
+      if (inherits(m, "negbin")) AIC(m) else NA_real_
+    })
+    
+    aic_table <- data.frame(
+      Model = names(aic_vals),
+      AIC   = as.numeric(aic_vals),
+      stringsAsFactors = FALSE
+    )
+    
+    aic_table <- aic_table[order(aic_table$AIC), ]
+    
+    write.table(aic_table,
+                file = file.path(output_path13, paste0("AIC_", sp, ".txt")),
+                sep = "\t", quote = FALSE, row.names = FALSE)
+    
+  } else {
+    message("No valid NB models for species ", sp)
+  }
+  
+  # ---- save summaries of valid models ----
+  sink(file.path(output_path14, paste0("summary_", sp, "_LM_AIC.txt")))
+  cat("=== Species:", sp, "===\n\n")
+  if(length(valid_models) > 0){
+    cat("AIC table:\n")
+    print(aic_table)
+    cat("\n\nModel summaries:\n")
+    for(nm in names(valid_models)){
+      cat("\n--- ", nm, " ---\n")
+      print(summary(valid_models[[nm]]))
+    }
+  } else {
+    cat("No valid NB models to summarize.\n")
+  }
+  sink()
+  
+} 
+
+
+############April Mean per Species Code###################
+output_path8 <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt eleven"
+
+
+final_table <- sp_data %>%
+  filter(MONTHNO == 4, SPECIES %in% spp_codes) %>%
+  group_by(SPECIES, YEAR) %>%
+  summarise(mean_count = mean(COUNT, na.rm = TRUE),
+            n = n(),
+            .groups = "drop")
+
+write.csv(final_table,
+          file.path(output_path8, "mean_counts_all_species.csv"),
+          row.names = FALSE)
+
+######Normal Info Pofiles#######
+spp_codes = c(14, 17, 18, 648, 998, 1345, 1376, 1398, 1405, 1546, 1631, 1640, 1646, 1651, 1652, 1653, 1654, 1657, 1659, 1663, 1665, 1666, 1669, 1681, 1693, 1702, 1707, 1708, 1709, 1713, 1716, 1719, 1722, 1727, 1728, 1732, 1734, 1738, 1742, 1746, 1747, 1750, 1752, 1754, 1755, 1756, 1758, 1759, 1761, 1762, 1764, 1765, 1766,1767, 1768, 1769, 1773, 1776, 1777, 1778, 1779, 1784, 1789, 1795, 1796, 1799, 1802, 1803, 1804, 1807, 1808, 1809, 1817, 1819, 1830, 1832, 1833, 1834, 1837, 1852, 1853, 1854, 1857, 1860, 1872, 1876, 1881, 1883, 1885, 1887, 1893, 1902, 1903, 1904, 1907, 1910, 1912, 1913, 1914, 1917, 1919, 1920, 1921, 1922, 1923, 1926, 1930, 1931, 1932, 1933, 1934, 1935, 1936, 1937, 1940, 1941, 1945, 1947, 1951, 1954, 1955, 1956, 1957, 1958, 1960, 1961, 1962, 1979, 1981, 2000, 2003, 2006, 2007, 2008, 2011, 2028, 2030, 2033, 2038, 2044, 2047, 2049, 2050, 2057, 2060, 2061, 2063 , 2064, 2078, 2089, 2091, 2098, 2102, 2107, 2109, 2110, 2111, 2112, 2117, 2118, 2119, 2120, 2122, 2126, 2127, 2128, 2130, 2133, 2134, 2138, 2139, 2147, 2150, 2155, 2160, 2163, 2164, 2166, 2171, 2173, 2176, 2179, 2182, 2186,2187, 2188 , 2189, 2190, 2193, 2198, 2199, 2216, 2229, 2232, 2236, 2237, 2240, 2243, 2245, 2248, 2255, 2256, 2258, 2262, 2263, 2264, 2265, 2267, 2270, 2271, 2274, 2280, 2281, 2284, 2291, 2293, 2297, 2302, 2305, 2306, 2318, 2321, 2322, 2327, 2330, 2331, 2335, 2337, 2338, 2339, 2341, 2342, 2343, 2345, 2350, 2353, 2360, 2361, 2364, 2375, 2379, 2380, 2381, 2382, 2385, 2387, 2389, 2422, 2434, 2439, 2441, 2442, 2443, 2444, 2449, 2450, 2469, 2474, 2477, 2484, 2489, 2492)
+species_info <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Species_Lookup.xlsx")
+image_folder <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images"
+output_path30 = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Sixteen/Sci Com Profiles"
+
+for(sp in spp_codes){
+  image_folder <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images"
+  info_row <- species_info %>% 
+    dplyr::filter(SPECIES == sp)
+  
+  if (nrow(info_row) == 1) {
+    
+    img_file <- info_row$`Image file`[1]
+    img_path <- file.path(image_folder, img_file)
+    
+    if (file.exists(img_path)) {
+      
+      img <- jpeg::readJPEG(img_path)
+      img_grob <- grid::rasterGrob(img, interpolate = TRUE)
+      
+      info_label <- paste0(
+        "<span style='font-size:22pt; font-weight:700;'>",
+        info_row$`Common Name`, "</span><br><br>",
+        
+        "<b>Scientific name:</b> <i>",
+        info_row$`Sci Name`, "</i><br>",
+        
+        "<b>Welsh name:</b> ", info_row$`Welsh Name`, "<br>",
+        "<b>Family:</b> ", info_row$Family, "<br>",
+        "<b>Wingspan:</b> ", info_row$Size, " mm"
+      )
+      
+      p_info <- ggplot() +
+        
+        # Image
+        annotation_custom(
+          img_grob,
+          xmin = 0.1, xmax = 0.9,
+          ymin = 0.55, ymax = 0.98
+        )+
+        
+        # Text block
+        annotate(
+          "richtext",
+          x = 0.05,
+          y = 0.50,
+          hjust = 0,
+          vjust = 1,
+          label = info_label,
+          size = 6,
+          fill = NA,
+          label.color = NA
+        )+
+        
+        theme_void() +
+        xlim(0, 1) +
+        ylim(0, 1)
+      
+    } else {
+      message("Image file missing for species ", sp)
+      p_info <- patchwork::plot_spacer()
+    }
+    
+  } else {
+    message("No lookup row for species ", sp)
+    p_info <- patchwork::plot_spacer()
+  }
+ggsave(
+  file.path(output_path30, paste0("combined_plot_", sp, ".png")),
+  p_info,
+  width = 5,
+  height = 5
+)
+}
+############Sci com Emojis#######
+df <- read_excel("C:/Users/izzyb/Downloads/Collection of Stats and photos.xlsx")
+View(Collection_of_Stats_and_photos)
+
+cols <- c("Week","Year","AvTemp","Rain","Direction","Speed","AFdays")
+
+# Load images
+imgs <- list(
+  Stable = image_read("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Emojis/Stable.jpg"),
+  Up     = image_read("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Emojis/Up.jpg"),
+  Down   = image_read("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Emojis/Down.jpg"),
+  NA_img     = image_read("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Images/Emojis/NA.jpg")
+)
+
+# Resize images for consistent panels
+imgs <- lapply(imgs, image_resize, "200x200!")
+
+# Function to convert image into ggplot
+img_plot <- function(img, title=NULL){
+  
+  g <- rasterGrob(as.raster(img), interpolate = TRUE)
+  
+  ggplot() +
+    annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+    theme_void() +
+    labs(title = title) +
+    theme(plot.title = element_text(hjust = 0.5, size=12))
+}
+
+
+output_path_stable = "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Eighteen"
+
+
+# Loop through dataframe rows
+for(i in 1:nrow(df)){
+  
+  plots <- lapply(cols, function(col){
+    
+    value <- as.character(df[i, col])
+    
+    if(is.na(value) || value == "NA") value <- "NA_img"
+    
+    img_plot(imgs[[value]], col)
+    
+  })
+  
+  # Fill remaining spaces to make 3x3 grid
+  while(length(plots) < 9){
+    plots[[length(plots)+1]] <- ggplot() + theme_void()
+  }
+  
+  panel <- wrap_plots(plots, nrow = 3, ncol = 3) +
+    plot_annotation(title = paste("SpId:", df$SpId[i]))
+  
+  ggsave(
+    filename = file.path(output_path_stable,
+                         paste0("combined_Emoji__plot", df$SpId[i], ".png")),
+    plot = panel,
+    width = 8,
+    height = 8
+  )
+}
+####emoji key####
+key_plot <- img_plot(imgs[["Stable_img"]], "Stable") |
+  img_plot(imgs[["Up"]], "Up") |
+  img_plot(imgs[["Down"]], "Down") |
+  img_plot(imgs[["NA_img"]], "NA")
+
+key_plot +
+  plot_annotation(title = "Key for Species Trends")
+
+###combine emoji to sp profile###
+profile_path <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Sixteen/Sci Com Profiles"
+emoji_path   <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Eighteen"
+output_path_final_sci_com  <- "C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Final Sci Com profiles"
+
+
+for(sp in spp_codes){
+  
+  profile_file <- file.path(profile_path,
+                            paste0("combined_plot_", sp, ".png"))
+  
+  emoji_file <- file.path(emoji_path,
+                          paste0("combined_Emoji__plot", sp, ".png"))
+  
+  if(file.exists(profile_file) & file.exists(emoji_file)){
+    
+    img1 <- image_read(profile_file) |> 
+      image_background("white", flatten = TRUE)
+    
+    img2 <- image_read(emoji_file)
+    
+    combined <- image_append(c(img1, img2))
+    
+    image_write(
+      combined,
+      file.path(output_path_final_sci_com, paste0("final_profile_", sp, ".png"))
+    )
+    
+  }
+}
+#####temporal changes due to seasonality changes#####
+Day_values <- read_excel("C:/Users/izzyb/OneDrive/Desktop/uni/Year 4 - MRes/Yes-MSc/Dissertation/Data/Whole time/Attempt Eighteen/Day values.xlsx")
+View(Day_values)
+boxplot(Day_values, ylab = "Number of Species")
+
+wilcox.test(
+  Day_values$`Being seen earlier`,
+  Day_values$`Being seen later`,
+  paired = TRUE
+)
 
